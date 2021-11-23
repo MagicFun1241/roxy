@@ -1,65 +1,31 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"github.com/valyala/fasthttp"
 	reverseProxy "github.com/yeqown/fasthttp-reverse-proxy"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
+	"net"
 	"strconv"
+	"time"
 )
-
-type HttpUpstreamServer struct {
-	Port uint32
-	Host string
-	Weight uint
-}
-
-type WebSocketUpstreamServer struct {
-	Port uint32
-	Host string
-}
-
-type HttpServer struct {
-	Name string
-	Port uint32
-	Domains []string
-	Upstream []HttpUpstreamServer
-}
-
-type WebSocketServer struct {
-	Name string
-	Port uint32
-	Upstream []WebSocketUpstreamServer `yaml:",flow"`
-}
-
-type Config struct {
-	Dns *string
-
-	Http *struct {
-		Servers []HttpServer `yaml:",flow"`
-	}
-
-	WebSocket *struct{
-		Servers []WebSocketServer `yaml:",flow"`
-	}
-}
 
 func main() {
 	configPath := flag.String("config", "config.yml", "config file path")
-
 	flag.Parse()
-
-	go startHttpServer(0)
-	go startHttpServer(1)
 
 	config := Config{}
 	configBytes, err := ioutil.ReadFile(*configPath)
+	if err != nil {
+		log.Fatal("Error reading config file")
+	}
 
 	err = yaml.Unmarshal(configBytes, &config)
 	if err != nil {
-		log.Fatalf("error: %v", err)
+		log.Fatal("Error processing config file")
 	}
 
 	configBytes = nil
@@ -73,29 +39,40 @@ func main() {
 		config.Dns = &dns
 	}
 
+	ipResolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: time.Millisecond * time.Duration(5000),
+			}
+			return d.DialContext(ctx, network, *config.Dns+":53")
+		},
+	}
+
 	if config.Http != nil {
 		for i := 0; i < len(config.Http.Servers); i++ {
 			var proxyServer *reverseProxy.ReverseProxy
 
-			if len(config.Http.Servers[i].Upstream) == 1 {
+			server := config.Http.Servers[i]
+			if len(server.Upstream) == 1 {
 				var upstream = config.Http.Servers[i].Upstream[0]
 				if !validateIp(upstream.Host) {
-					upstream.Host = lookupIp(upstream.Host, *config.Dns)
+					upstream.Host = lookupIp(ipResolver, upstream.Host)
 				}
 
 				proxyServer = reverseProxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
 			} else {
 				weights := make(map[string]reverseProxy.Weight)
 
-				for j := 0; j < len(config.Http.Servers[i].Upstream); j++ {
-					var upstream = config.Http.Servers[i].Upstream[j]
+				for j := 0; j < len(server.Upstream); j++ {
+					var upstream = server.Upstream[j]
 					if !validateIp(upstream.Host) {
-						upstream.Host = lookupIp(upstream.Host, *config.Dns)
+						upstream.Host = lookupIp(ipResolver, upstream.Host)
 					}
 
 					if j == 0 && len(weights) == 2 {
-						addr := upstream.Host+":"+strconv.Itoa(int(upstream.Port))
-						weights[addr] = reverseProxy.Weight(upstream.Weight-1)
+						addr := upstream.Host + ":" + strconv.Itoa(int(upstream.Port))
+						weights[addr] = reverseProxy.Weight(upstream.Weight - 1)
 
 						assistantProxy := reverseProxy.NewReverseProxy(addr)
 						assistantPort := strconv.Itoa(findPort())
@@ -112,9 +89,30 @@ func main() {
 				proxyServer = reverseProxy.NewReverseProxy("", reverseProxy.WithBalancer(weights))
 			}
 
-			err := fasthttp.ListenAndServe(":"+strconv.Itoa(int(config.Http.Servers[i].Port)), func (ctx *fasthttp.RequestCtx) {
-				proxyServer.ServeHTTP(ctx)
-			})
+			var handler func(ctx *fasthttp.RequestCtx)
+
+			if server.Domains == nil {
+				handler = func(ctx *fasthttp.RequestCtx) {
+					proxyServer.ServeHTTP(ctx)
+				}
+			} else {
+				handler = func(ctx *fasthttp.RequestCtx) {
+					var host = string(ctx.Host())
+					for i, v := range server.Domains {
+						if v == host {
+							break
+						}
+
+						if i == len(server.Domains)-1 {
+							return
+						}
+					}
+
+					proxyServer.ServeHTTP(ctx)
+				}
+			}
+
+			err := fasthttp.ListenAndServe(":"+strconv.Itoa(int(config.Http.Servers[i].Port)), handler)
 
 			if err != nil {
 				log.Fatal(err)
@@ -130,7 +128,7 @@ func main() {
 
 			for j := 0; j < len(server.Upstream); j++ {
 				var upstream = server.Upstream[j]
-				options = append(options, reverseProxy.WithURL_OptionWS("ws://"+upstream.Host+":"+ strconv.Itoa(int(upstream.Port))))
+				options = append(options, reverseProxy.WithURL_OptionWS("ws://"+upstream.Host+":"+strconv.Itoa(int(upstream.Port))))
 			}
 
 			proxyServer, _ := reverseProxy.NewWSReverseProxyWith(options...)
@@ -142,8 +140,6 @@ func main() {
 			}
 		}
 	}
-
-	config = Config{}
 
 	log.Print("Roxy started")
 }
