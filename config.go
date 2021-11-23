@@ -24,8 +24,14 @@ type webSocketServer struct {
 	Upstream []upstreamServer `yaml:",flow"`
 }
 
+type security struct {
+	AllowedHosts []string `yaml:",flow"`
+}
+
 type Config struct {
 	Dns *string
+
+	Security *security
 
 	Http *struct {
 		Servers []httpServer `yaml:",flow"`

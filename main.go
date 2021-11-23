@@ -9,9 +9,15 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"sort"
 	"strconv"
 	"time"
 )
+
+func errorHandler(ctx *fasthttp.RequestCtx) {
+	ctx.SetStatusCode(400)
+	ctx.SetBodyString("Internal error")
+}
 
 func main() {
 	configPath := flag.String("config", "config.yml", "config file path")
@@ -39,6 +45,27 @@ func main() {
 		config.Dns = &dns
 	}
 
+	if config.Security != nil {
+		if config.Security.AllowedHosts != nil {
+			var t []string
+			for _, ip := range config.Security.AllowedHosts {
+				if validateIp(ip) {
+					t = append(t, ip)
+				} else {
+					ip, ipNet, err := net.ParseCIDR(ip)
+					if err != nil {
+						return
+					}
+
+					l, _ := AllHosts(ip, ipNet)
+					t = append(t, l...)
+				}
+			}
+
+			sort.Strings(t)
+		}
+	}
+
 	ipResolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -57,7 +84,7 @@ func main() {
 			if len(server.Upstream) == 1 {
 				var upstream = config.Http.Servers[i].Upstream[0]
 				if !validateIp(upstream.Host) {
-					upstream.Host = lookupIp(ipResolver, upstream.Host)
+					upstream.Host = LookupIp(ipResolver, upstream.Host)
 				}
 
 				proxyServer = reverseProxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
@@ -67,7 +94,7 @@ func main() {
 				for j := 0; j < len(server.Upstream); j++ {
 					var upstream = server.Upstream[j]
 					if !validateIp(upstream.Host) {
-						upstream.Host = lookupIp(ipResolver, upstream.Host)
+						upstream.Host = LookupIp(ipResolver, upstream.Host)
 					}
 
 					if j == 0 && len(weights) == 2 {
@@ -104,11 +131,24 @@ func main() {
 						}
 
 						if i == len(server.Domains)-1 {
+							errorHandler(ctx)
 							return
 						}
 					}
 
 					proxyServer.ServeHTTP(ctx)
+				}
+			}
+
+			if config.Security != nil && config.Security.AllowedHosts != nil {
+				handler = func(ctx *fasthttp.RequestCtx) {
+					foundIndex := sort.SearchStrings(config.Security.AllowedHosts, ctx.RemoteIP().String())
+					if foundIndex == len(config.Security.AllowedHosts) {
+						errorHandler(ctx)
+						return
+					}
+
+					handler(ctx)
 				}
 			}
 
