@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"github.com/valyala/fasthttp"
-	reverseProxy "github.com/yeqown/fasthttp-reverse-proxy"
+	"github.com/yeqown/fasthttp-reverse-proxy"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
@@ -78,7 +78,7 @@ func main() {
 
 	if config.Http != nil {
 		for i := 0; i < len(config.Http.Servers); i++ {
-			var proxyServer *reverseProxy.ReverseProxy
+			var proxyServer *proxy.ReverseProxy
 
 			server := config.Http.Servers[i]
 			if len(server.Upstream) == 1 {
@@ -87,9 +87,9 @@ func main() {
 					upstream.Host = LookupIp(ipResolver, upstream.Host)
 				}
 
-				proxyServer = reverseProxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
+				proxyServer = proxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
 			} else {
-				weights := make(map[string]reverseProxy.Weight)
+				weights := make(map[string]proxy.Weight)
 
 				for j := 0; j < len(server.Upstream); j++ {
 					var upstream = server.Upstream[j]
@@ -99,21 +99,21 @@ func main() {
 
 					if j == 0 && len(weights) == 2 {
 						addr := upstream.Host + ":" + strconv.Itoa(int(upstream.Port))
-						weights[addr] = reverseProxy.Weight(upstream.Weight - 1)
+						weights[addr] = proxy.Weight(upstream.Weight - 1)
 
-						assistantProxy := reverseProxy.NewReverseProxy(addr)
+						assistantProxy := proxy.NewReverseProxy(addr)
 						assistantPort := strconv.Itoa(findPort())
 						_ = fasthttp.ListenAndServe(":"+assistantPort, func(ctx *fasthttp.RequestCtx) {
 							assistantProxy.ServeHTTP(ctx)
 						})
 
-						weights[upstream.Host+":"+assistantPort] = reverseProxy.Weight(1)
+						weights[upstream.Host+":"+assistantPort] = proxy.Weight(1)
 					} else {
-						weights[upstream.Host+":"+strconv.Itoa(int(upstream.Port))] = reverseProxy.Weight(upstream.Weight)
+						weights[upstream.Host+":"+strconv.Itoa(int(upstream.Port))] = proxy.Weight(upstream.Weight)
 					}
 				}
 
-				proxyServer = reverseProxy.NewReverseProxy("", reverseProxy.WithBalancer(weights))
+				proxyServer = proxy.NewReverseProxy("", proxy.WithBalancer(weights))
 			}
 
 			var handler func(ctx *fasthttp.RequestCtx)
@@ -164,14 +164,14 @@ func main() {
 		for i := 0; i < len(config.WebSocket.Servers); i++ {
 			var server = config.WebSocket.Servers[i]
 
-			options := make([]reverseProxy.OptionWS, len(server.Upstream))
+			options := make([]proxy.OptionWS, len(server.Upstream))
 
 			for j := 0; j < len(server.Upstream); j++ {
 				var upstream = server.Upstream[j]
-				options = append(options, reverseProxy.WithURL_OptionWS("ws://"+upstream.Host+":"+strconv.Itoa(int(upstream.Port))))
+				options = append(options, proxy.WithURL_OptionWS("ws://"+upstream.Host+":"+strconv.Itoa(int(upstream.Port))))
 			}
 
-			proxyServer, _ := reverseProxy.NewWSReverseProxyWith(options...)
+			proxyServer, _ := proxy.NewWSReverseProxyWith(options...)
 
 			if err := fasthttp.ListenAndServe(":"+strconv.Itoa(int(server.Port)), func(ctx *fasthttp.RequestCtx) {
 				proxyServer.ServeHTTP(ctx)

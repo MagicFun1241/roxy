@@ -1,4 +1,4 @@
-module roxy
+module github.com/MagicFun1241/roxy
 
 go 1.16
 
