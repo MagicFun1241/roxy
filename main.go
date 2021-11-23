@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"github.com/valyala/fasthttp"
-	"github.com/yeqown/fasthttp-reverse-proxy"
+	"github.com/yeqown/fasthttp-reverse-proxy/v2"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
@@ -164,7 +164,7 @@ func main() {
 		for i := 0; i < len(config.WebSocket.Servers); i++ {
 			var server = config.WebSocket.Servers[i]
 
-			options := make([]proxy.OptionWS, len(server.Upstream))
+			var options = make([]proxy.OptionWS, len(server.Upstream))
 
 			for j := 0; j < len(server.Upstream); j++ {
 				var upstream = server.Upstream[j]
