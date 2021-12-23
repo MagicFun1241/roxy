@@ -29,13 +29,13 @@ func main() {
 	config := Config{}
 	configBytes, err := ioutil.ReadFile(*configPath)
 	if err != nil {
-		Fatal("Error reading config file")
+		log.Fatal("Error reading config file")
 		return
 	}
 
 	err = yaml.Unmarshal(configBytes, &config)
 	if err != nil {
-		Fatal("Error processing config file")
+		log.Fatal("Error processing config file")
 		return
 	}
 
@@ -86,134 +86,207 @@ func main() {
 	}
 
 	if config.Http != nil {
-		for i := 0; i < len(config.Http.Servers); i++ {
-			var proxyServer *proxy.ReverseProxy
-			var middlewares []func(ctx *fasthttp.RequestCtx)
+		type defaultServer struct {
+			Domains []string
+			Origin  string
+		}
 
-			server := config.Http.Servers[i]
+		var usesDefaultPort []defaultServer
 
-			if server.AllowedHostsGroups != nil {
-				for _, group := range server.AllowedHostsGroups {
-					if config.Security.AllowedHostsGroups[group] == nil {
-						Fatalf("Item refers to not exist group '%s'\n", group)
-						return
-					}
-				}
-			}
+		if config.Http.Servers != nil {
+			for i := 0; i < len(config.Http.Servers); i++ {
+				var proxyServer *proxy.ReverseProxy
+				var middlewares []func(ctx *fasthttp.RequestCtx)
 
-			if len(server.Upstream) == 1 {
-				var upstream = config.Http.Servers[i].Upstream[0]
-				if !validateIp(upstream.Host) {
-					upstream.Host = LookupIp(ipResolver, upstream.Host)
-				}
+				server := config.Http.Servers[i]
 
-				if server.Quic != nil || *server.Quic {
-					if server.QuicKey == nil || server.QuicCertificate == nil {
-						log.Error("'quicKey' and 'quicCertificate' must be passed")
+				if server.Port == nil {
+					if len(server.Upstream) > 1 {
+						log.Error("Servers on default port must contain single upstream")
 						return
 					}
 
-					if _, err := os.Stat(*server.QuicKey); os.IsNotExist(err) {
-						log.Error("http3 key file not found")
-						return
-					}
-
-					if _, err := os.Stat(*server.QuicCertificate); os.IsNotExist(err) {
-						log.Error("http3 certificate file not found")
-						return
-					}
-
-					go func() {
-						originUrl, _ := url.Parse(fmt.Sprintf("http://%s:%d", server.Upstream[0].Host, server.Upstream[0].Port))
-						addr := fmt.Sprintf(":%d", server.Port)
-						Infof("Starting http3 server at %s", addr)
-
-						httpProxy := httputil.NewSingleHostReverseProxy(originUrl)
-						err = http3.ListenAndServeQUIC(addr, *server.QuicCertificate, *server.QuicKey, httpProxy)
-						if err != nil {
-							Fatal(err)
-						}
-					}()
-				}
-
-				proxyServer = proxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
-			} else {
-				weights := make(map[string]proxy.Weight)
-
-				if server.Quic != nil && *server.Quic {
-					log.Warn("http3 load balancing is not supported")
-				}
-
-				for j := 0; j < len(server.Upstream); j++ {
-					var upstream = server.Upstream[j]
+					var upstream = server.Upstream[0]
 					if !validateIp(upstream.Host) {
 						upstream.Host = LookupIp(ipResolver, upstream.Host)
 					}
 
-					if j == 0 && len(weights) == 2 {
-						addr := upstream.Host + ":" + strconv.Itoa(int(upstream.Port))
-						weights[addr] = proxy.Weight(upstream.Weight - 1)
+					usesDefaultPort = append(usesDefaultPort, defaultServer{
+						Domains: server.Domains,
+						Origin:  fmt.Sprintf("%s:%d", upstream.Host, upstream.Port),
+					})
+					continue
+				}
 
-						assistantProxy := proxy.NewReverseProxy(addr)
-						assistantPort := strconv.Itoa(findPort())
-						_ = fasthttp.ListenAndServe(":"+assistantPort, func(ctx *fasthttp.RequestCtx) {
-							assistantProxy.ServeHTTP(ctx)
-						})
-
-						weights[upstream.Host+":"+assistantPort] = proxy.Weight(1)
-					} else {
-						weights[upstream.Host+":"+strconv.Itoa(int(upstream.Port))] = proxy.Weight(upstream.Weight)
+				if server.AllowedHostsGroups != nil {
+					for _, group := range server.AllowedHostsGroups {
+						if config.Security.AllowedHostsGroups[group] == nil {
+							Fatalf("Item refers to not exist group '%s'\n", group)
+							return
+						}
 					}
 				}
 
-				proxyServer = proxy.NewReverseProxy("", proxy.WithBalancer(weights))
-			}
+				if len(server.Upstream) == 1 {
+					var upstream = config.Http.Servers[i].Upstream[0]
+					if !validateIp(upstream.Host) {
+						upstream.Host = LookupIp(ipResolver, upstream.Host)
+					}
 
-			r := router.New()
-
-			if server.Domains != nil {
-				middlewares = append(middlewares, func(ctx *fasthttp.RequestCtx) {
-					var host = string(ctx.Host())
-					for i, v := range server.Domains {
-						if v == host {
-							break
+					if server.Quic != nil || *server.Quic {
+						if server.QuicKey == nil || server.QuicCertificate == nil {
+							log.Error("'quicKey' and 'quicCertificate' must be passed")
+							return
 						}
 
-						if i == len(server.Domains)-1 {
-							ctx.Error("Unknown domain", fasthttp.StatusForbidden)
+						if _, err := os.Stat(*server.QuicKey); os.IsNotExist(err) {
+							log.Error("http3 key file not found")
+							return
+						}
+
+						if _, err := os.Stat(*server.QuicCertificate); os.IsNotExist(err) {
+							log.Error("http3 certificate file not found")
+							return
+						}
+
+						go func() {
+							originUrl, _ := url.Parse(fmt.Sprintf("http://%s:%d", server.Upstream[0].Host, server.Upstream[0].Port))
+							addr := fmt.Sprintf(":%d", server.Port)
+							Infof("Starting http3 server at %s", addr)
+
+							httpProxy := httputil.NewSingleHostReverseProxy(originUrl)
+							err = http3.ListenAndServeQUIC(addr, *server.QuicCertificate, *server.QuicKey, httpProxy)
+							if err != nil {
+								Fatal(err)
+							}
+						}()
+					}
+
+					proxyServer = proxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
+				} else {
+					weights := make(map[string]proxy.Weight)
+
+					if server.Quic != nil && *server.Quic {
+						log.Warn("http3 load balancing is not supported")
+					}
+
+					for j := 0; j < len(server.Upstream); j++ {
+						var upstream = server.Upstream[j]
+						if !validateIp(upstream.Host) {
+							upstream.Host = LookupIp(ipResolver, upstream.Host)
+						}
+
+						if j == 0 && len(weights) == 2 {
+							addr := upstream.Host + ":" + strconv.Itoa(int(upstream.Port))
+							weights[addr] = proxy.Weight(upstream.Weight - 1)
+
+							assistantProxy := proxy.NewReverseProxy(addr)
+							assistantPort := strconv.Itoa(findPort())
+							_ = fasthttp.ListenAndServe(":"+assistantPort, func(ctx *fasthttp.RequestCtx) {
+								assistantProxy.ServeHTTP(ctx)
+							})
+
+							weights[upstream.Host+":"+assistantPort] = proxy.Weight(1)
+						} else {
+							weights[upstream.Host+":"+strconv.Itoa(int(upstream.Port))] = proxy.Weight(upstream.Weight)
 						}
 					}
-				})
-			}
 
-			if config.Security != nil && config.Security.AllowedHostsGroups != nil && server.AllowedHostsGroups != nil {
-				middlewares = append(middlewares, func(ctx *fasthttp.RequestCtx) {
-					for i, group := range server.AllowedHostsGroups {
-						ips := config.Security.AllowedHostsGroups[group]
-						foundIndex := sort.SearchStrings(ips, ctx.RemoteIP().String())
-
-						if foundIndex == len(ips) && i == len(server.AllowedHostsGroups)-1 {
-							Errorf("Connection from %s to :%d is not allowed with groups %v", ctx.RemoteIP().String(), server.Port, server.AllowedHostsGroups)
-							ctx.Error("Access denied", fasthttp.StatusForbidden)
-						}
-					}
-				})
-			}
-
-			r.ANY("/*", func(ctx *fasthttp.RequestCtx) {
-				for _, m := range middlewares {
-					m(ctx)
+					proxyServer = proxy.NewReverseProxy("", proxy.WithBalancer(weights))
 				}
 
-				proxyServer.ServeHTTP(ctx)
-			})
+				r := router.New()
 
+				if server.Domains != nil {
+					middlewares = append(middlewares, func(ctx *fasthttp.RequestCtx) {
+						var host = string(ctx.Host())
+						for i, v := range server.Domains {
+							if v == host {
+								break
+							}
+
+							if i == len(server.Domains)-1 {
+								ctx.Error("Unknown domain", fasthttp.StatusForbidden)
+							}
+						}
+					})
+				}
+
+				if config.Security != nil && config.Security.AllowedHostsGroups != nil && server.AllowedHostsGroups != nil {
+					middlewares = append(middlewares, func(ctx *fasthttp.RequestCtx) {
+						for i, group := range server.AllowedHostsGroups {
+							ips := config.Security.AllowedHostsGroups[group]
+							foundIndex := sort.SearchStrings(ips, ctx.RemoteIP().String())
+
+							if foundIndex == len(ips) && i == len(server.AllowedHostsGroups)-1 {
+								Errorf("Connection from %s to :%d is not allowed with groups %v", ctx.RemoteIP().String(), server.Port, server.AllowedHostsGroups)
+								ctx.Error("Access denied", fasthttp.StatusForbidden)
+							}
+						}
+					})
+				}
+
+				r.ANY("/*", func(ctx *fasthttp.RequestCtx) {
+					for _, m := range middlewares {
+						m(ctx)
+					}
+
+					proxyServer.ServeHTTP(ctx)
+				})
+
+				go func() {
+					addr := fmt.Sprintf(":%d", server.Port)
+					Infof("Starting http server at %s", addr)
+					err := fasthttp.ListenAndServe(addr, r.Handler)
+					if err != nil {
+						Fatal(err)
+					}
+				}()
+			}
+		}
+
+		if config.Http.Default != nil || len(usesDefaultPort) > 0 {
 			go func() {
-				addr := fmt.Sprintf(":%d", server.Port)
-				Infof("Starting http server at %s", addr)
-				err := fasthttp.ListenAndServe(addr, r.Handler)
-				if err != nil {
-					Fatal(err)
+				Info("Starting default http proxy")
+
+				var httpProxy *proxy.ReverseProxy
+
+				if config.Http.Default != nil {
+					httpProxy = proxy.NewReverseProxy(fmt.Sprintf(":%d", config.Http.Default.Port))
+				}
+
+				var otherProxies map[string]*proxy.ReverseProxy
+				if len(usesDefaultPort) > 0 {
+					otherProxies = make(map[string]*proxy.ReverseProxy, len(usesDefaultPort))
+				}
+
+				for _, s := range usesDefaultPort {
+					otherProxies[s.Origin] = proxy.NewReverseProxy(s.Origin)
+				}
+
+				if err := fasthttp.ListenAndServe(":80", func(ctx *fasthttp.RequestCtx) {
+					host := string(ctx.Request.Header.Peek("Host"))
+					if host == "" {
+						ctx.Error("Unknown domain", fasthttp.StatusForbidden)
+						return
+					}
+
+					if len(usesDefaultPort) > 0 {
+						for _, s := range usesDefaultPort {
+							for _, d := range s.Domains {
+								if d == host {
+									otherProxies[s.Origin].ServeHTTP(ctx)
+									return
+								}
+							}
+						}
+
+						ctx.Error("Unknown domain", fasthttp.StatusForbidden)
+					} else if httpProxy != nil {
+						httpProxy.ServeHTTP(ctx)
+					}
+				}); err != nil {
+					log.Fatal(err)
 				}
 			}()
 		}

@@ -21,10 +21,6 @@ security:
 http:
   servers:
     - name: Test
-      port: 2000
-      quic: true
-      quicKey: "./key"
-      quicCertificate: "./cert.pem"
       allowedHostsGroups:
         - cloudflare
       domains:

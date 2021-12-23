@@ -11,9 +11,13 @@ type upstreamServer struct {
 	Host string
 }
 
+type defaultHttpServer struct {
+	Port uint32
+}
+
 type httpServer struct {
 	Name               string
-	Port               uint32
+	Port               *uint32
 	Domains            []string
 	AllowedHostsGroups []string
 	Upstream           []upstreamServerWithWeight
@@ -40,6 +44,7 @@ type Config struct {
 	Security *security
 
 	Http *struct {
+		Default *defaultHttpServer
 		Servers []httpServer `yaml:",flow"`
 	}
 
