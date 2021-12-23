@@ -12,20 +12,26 @@ type upstreamServer struct {
 }
 
 type httpServer struct {
-	Name     string
-	Port     uint32
-	Domains  []string
-	Upstream []upstreamServerWithWeight
+	Name               string
+	Port               uint32
+	Domains            []string
+	AllowedHostsGroups []string
+	Upstream           []upstreamServerWithWeight
+
+	Quic            *bool
+	QuicCertificate *string `yaml:"quicCertificate"`
+	QuicKey         *string `yaml:"quicKey"`
 }
 
 type webSocketServer struct {
-	Name     string
-	Port     uint32
-	Upstream []upstreamServer `yaml:",flow"`
+	Name               string
+	Port               uint32
+	AllowedHostsGroups []string
+	Upstream           []upstreamServer `yaml:",flow"`
 }
 
 type security struct {
-	AllowedHosts []string `yaml:",flow"`
+	AllowedHostsGroups map[string][]string `yaml:"allowedHostsGroups"`
 }
 
 type Config struct {

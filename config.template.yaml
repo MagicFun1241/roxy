@@ -1,5 +1,6 @@
 security:
-  allowedHosts:
+  allowedHostsGroups:
+    cloudflare:
     - 103.21.244.0/22
     - 103.22.200.0/22
     - 103.31.4.0/22
@@ -14,19 +15,23 @@ security:
     - 190.93.240.0/20
     - 197.234.240.0/22
     - 198.41.128.0/17
+    local:
+    - 192.168.1.0/24
 
 http:
   servers:
     - name: Test
       port: 2000
+      quic: true
+      quicKey: "./key"
+      quicCertificate: "./cert.pem"
+      allowedHostsGroups:
+        - cloudflare
       domains:
         - magicfun.host
       upstream:
         - host: google.ru
           port: 80
-
-        - host: 127.0.0.1
-          port: 3001
 
 websocket:
   servers:
