@@ -31,6 +31,3 @@ http:
         - value: /static
           toStatic:
             root: test
-
-static:
-  - root: test

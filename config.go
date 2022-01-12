@@ -7,12 +7,12 @@ type upstreamServerWithWeight struct {
 }
 
 type upstreamServer struct {
-	Port uint32
+	Port uint16
 	Host string
 }
 
 type defaultHttpServer struct {
-	Port uint32
+	Port uint16
 }
 
 type httpRoute struct {
