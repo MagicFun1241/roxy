@@ -4,12 +4,10 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e05a6c49-0443-4dbf-9cc1-8ad9bb39f906" name="Changes" comment="Implement:&#10;• Static serving&#10;• If the port is not specified, vhost will be used&#10;&#10;Optimizations:&#10;• Change port type from uint32 -&gt; uint16&#10;• Remove unnecessary router&#10;• Migrate from custom logger to clog&#10;&#10;Other changes:&#10;• Change error message when 'Host' header not exist in vhost">
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+    <list default="true" id="e05a6c49-0443-4dbf-9cc1-8ad9bb39f906" name="Changes" comment="Create README.md">
       <change afterPath="$PROJECT_DIR$/build/test/session" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.go" beforeDir="false" afterPath="$PROJECT_DIR$/config.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.template.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/config.template.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -142,7 +140,8 @@
     <MESSAGE value="Implement:&#10;• http3 to http2 with single upstream&#10;• allowedHostsGroups&#10;• logger&#10;&#10;Fix:&#10;• disable proxy debug message" />
     <MESSAGE value="Implement:&#10;• multiple servers on single 80 port (vport)" />
     <MESSAGE value="Implement:&#10;• Static serving&#10;• If the port is not specified, vhost will be used&#10;&#10;Optimizations:&#10;• Change port type from uint32 -&gt; uint16&#10;• Remove unnecessary router&#10;• Migrate from custom logger to clog&#10;&#10;Other changes:&#10;• Change error message when 'Host' header not exist in vhost" />
-    <option name="LAST_COMMIT_MESSAGE" value="Implement:&#10;• Static serving&#10;• If the port is not specified, vhost will be used&#10;&#10;Optimizations:&#10;• Change port type from uint32 -&gt; uint16&#10;• Remove unnecessary router&#10;• Migrate from custom logger to clog&#10;&#10;Other changes:&#10;• Change error message when 'Host' header not exist in vhost" />
+    <MESSAGE value="Create README.md" />
+    <option name="LAST_COMMIT_MESSAGE" value="Create README.md" />
   </component>
   <component name="VgoProject">
     <integration-enabled>true</integration-enabled>
