@@ -5,20 +5,32 @@ import (
 	"flag"
 	"fmt"
 	"github.com/MagicFun1241/fasthttp-reverse-proxy/v2"
-	"github.com/fasthttp/router"
+	"github.com/MagicFun1241/roxy/core"
+	"github.com/MagicFun1241/roxy/core/js/logger"
+	pluginsCore "github.com/MagicFun1241/roxy/plugins/core"
+	"github.com/dop251/goja"
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/valyala/fasthttp"
-	"github.com/yeqown/log"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	log "unknwon.dev/clog/v2"
 )
+
+func init() {
+	err := log.NewConsole()
+	if err != nil {
+		panic("unable to create new logger: " + err.Error())
+	}
+}
 
 func main() {
 	configPath := flag.String("config", "config.yml", "config file path")
@@ -41,14 +53,35 @@ func main() {
 
 	configBytes = nil
 
+	vm := goja.New()
+	pluginsCore.RegisterModule(vm)
+	logger.Register(vm)
+
+	if config.Plugins != nil {
+		for _, plugin := range config.Plugins {
+			p := path.Join("plugins", fmt.Sprintf("%s.js", plugin))
+			if _, err := os.Stat(p); os.IsNotExist(err) {
+				log.Warn("Plugin '%s' file is not exists", plugin)
+			}
+
+			pluginCode, _ := ioutil.ReadFile(p)
+			_, err = vm.RunString(string(pluginCode))
+
+			if err != nil {
+				log.Error(err.Error())
+			}
+		}
+	}
+
 	if config.Dns != nil {
 		if !validateIp(*config.Dns) {
-			Fatal("Invalid DNS")
+			log.Fatal("Invalid DNS")
 		}
 	} else {
 		var dns = "1.1.1.1"
 		config.Dns = &dns
 	}
+	log.Info("DNS registered")
 
 	ipResolver := &net.Resolver{
 		PreferGo: true,
@@ -70,7 +103,7 @@ func main() {
 					} else {
 						ip, ipNet, err := net.ParseCIDR(ip)
 						if err != nil {
-							Fatalf("Invalid ip or mask passed for '%s' allowedHostsGroup\n", groupName)
+							log.Fatal("Invalid ip or mask passed for '%s' allowedHostsGroup\n", groupName)
 							return
 						}
 
@@ -86,49 +119,36 @@ func main() {
 	}
 
 	if config.Http != nil {
-		type defaultServer struct {
-			Domains []string
-			Origin  string
-		}
+		var usesDefaultPort []*httpServer
 
-		var usesDefaultPort []defaultServer
+		var filesystemHandlers = make(map[string]fasthttp.RequestHandler)
 
 		if config.Http.Servers != nil {
-			for i := 0; i < len(config.Http.Servers); i++ {
+			for serverIndex, server := range config.Http.Servers {
 				var proxyServer *proxy.ReverseProxy
 				var middlewares []func(ctx *fasthttp.RequestCtx)
 
-				server := config.Http.Servers[i]
-
-				if server.Port == nil {
+				if server.Port == 0 || server.Port == 80 {
 					if len(server.Upstream) > 1 {
 						log.Error("Servers on default port must contain single upstream")
 						return
 					}
 
-					var upstream = server.Upstream[0]
-					if !validateIp(upstream.Host) {
-						upstream.Host = LookupIp(ipResolver, upstream.Host)
-					}
-
-					usesDefaultPort = append(usesDefaultPort, defaultServer{
-						Domains: server.Domains,
-						Origin:  fmt.Sprintf("%s:%d", upstream.Host, upstream.Port),
-					})
+					usesDefaultPort = append(usesDefaultPort, &server)
 					continue
 				}
 
 				if server.AllowedHostsGroups != nil {
 					for _, group := range server.AllowedHostsGroups {
 						if config.Security.AllowedHostsGroups[group] == nil {
-							Fatalf("Item refers to not exist group '%s'\n", group)
+							log.Fatal("Item refers to not exist group '%s'\n", group)
 							return
 						}
 					}
 				}
 
 				if len(server.Upstream) == 1 {
-					var upstream = config.Http.Servers[i].Upstream[0]
+					var upstream = server.Upstream[0]
 					if !validateIp(upstream.Host) {
 						upstream.Host = LookupIp(ipResolver, upstream.Host)
 					}
@@ -152,50 +172,18 @@ func main() {
 						go func() {
 							originUrl, _ := url.Parse(fmt.Sprintf("http://%s:%d", server.Upstream[0].Host, server.Upstream[0].Port))
 							addr := fmt.Sprintf(":%d", server.Port)
-							Infof("Starting http3 server at %s", addr)
+							log.Info("Starting http3 server at %s", addr)
 
 							httpProxy := httputil.NewSingleHostReverseProxy(originUrl)
 							err = http3.ListenAndServeQUIC(addr, *server.QuicCertificate, *server.QuicKey, httpProxy)
 							if err != nil {
-								Fatal(err)
+								log.Fatal(err.Error())
 							}
 						}()
 					}
 
 					proxyServer = proxy.NewReverseProxy(upstream.Host + ":" + strconv.Itoa(int(upstream.Port)))
-				} else {
-					weights := make(map[string]proxy.Weight)
-
-					if server.Quic != nil && *server.Quic {
-						log.Warn("http3 load balancing is not supported")
-					}
-
-					for j := 0; j < len(server.Upstream); j++ {
-						var upstream = server.Upstream[j]
-						if !validateIp(upstream.Host) {
-							upstream.Host = LookupIp(ipResolver, upstream.Host)
-						}
-
-						if j == 0 && len(weights) == 2 {
-							addr := upstream.Host + ":" + strconv.Itoa(int(upstream.Port))
-							weights[addr] = proxy.Weight(upstream.Weight - 1)
-
-							assistantProxy := proxy.NewReverseProxy(addr)
-							assistantPort := strconv.Itoa(findPort())
-							_ = fasthttp.ListenAndServe(":"+assistantPort, func(ctx *fasthttp.RequestCtx) {
-								assistantProxy.ServeHTTP(ctx)
-							})
-
-							weights[upstream.Host+":"+assistantPort] = proxy.Weight(1)
-						} else {
-							weights[upstream.Host+":"+strconv.Itoa(int(upstream.Port))] = proxy.Weight(upstream.Weight)
-						}
-					}
-
-					proxyServer = proxy.NewReverseProxy("", proxy.WithBalancer(weights))
 				}
-
-				r := router.New()
 
 				if server.Domains != nil {
 					middlewares = append(middlewares, func(ctx *fasthttp.RequestCtx) {
@@ -219,52 +207,91 @@ func main() {
 							foundIndex := sort.SearchStrings(ips, ctx.RemoteIP().String())
 
 							if foundIndex == len(ips) && i == len(server.AllowedHostsGroups)-1 {
-								Errorf("Connection from %s to :%d is not allowed with groups %v", ctx.RemoteIP().String(), server.Port, server.AllowedHostsGroups)
+								log.Error("Connection from %s to :%d is not allowed with groups %v", ctx.RemoteIP().String(), server.Port, server.AllowedHostsGroups)
 								ctx.Error("Access denied", fasthttp.StatusForbidden)
 							}
 						}
 					})
 				}
 
-				r.ANY("/*", func(ctx *fasthttp.RequestCtx) {
-					for _, m := range middlewares {
-						m(ctx)
-					}
+				serverIndex := serverIndex
+				go func(port uint16, routes []httpRoute) {
+					addr := fmt.Sprintf(":%d", port)
+					log.Info("Starting http server at %s", addr)
+					err := fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
+						urlPath := string(ctx.Path())
 
-					proxyServer.ServeHTTP(ctx)
-				})
+						for routeIndex, route := range routes {
+							if route.ToStatic != (routeStatic{}) && strings.HasPrefix(urlPath, route.Value) {
+								startOffset := strings.LastIndex(urlPath, route.Value)
+								if startOffset == 0 {
+									startOffset = len(route.Value)
+								}
 
-				go func() {
-					addr := fmt.Sprintf(":%d", server.Port)
-					Infof("Starting http server at %s", addr)
-					err := fasthttp.ListenAndServe(addr, r.Handler)
+								newPath := urlPath[startOffset:]
+								ctx.Request.URI().SetPath(newPath)
+
+								key := core.FormatFilesystemHandlerKey(core.LocationGeneral, serverIndex, routeIndex)
+								if filesystemHandlers[key] == nil {
+									fs := &fasthttp.FS{
+										Root:               route.ToStatic.Root,
+										IndexNames:         []string{"index.html"},
+										GenerateIndexPages: route.ToStatic.IndexPages,
+									}
+
+									filesystemHandlers[key] = fs.NewRequestHandler()
+								}
+
+								filesystemHandlers[key](ctx)
+								return
+							} else if route.To != "" && strings.HasPrefix(urlPath, route.Value) {
+								for _, m := range middlewares {
+									m(ctx)
+								}
+
+								proxyServer.ServeHTTP(ctx)
+								return
+							}
+						}
+
+						ctx.Error("Not found", fasthttp.StatusNotFound)
+					})
 					if err != nil {
-						Fatal(err)
+						log.Fatal(err.Error())
 					}
-				}()
+				}(server.Port, server.Routes)
 			}
 		}
 
 		if config.Http.Default != nil || len(usesDefaultPort) > 0 {
+			log.Info("Starting default http proxy")
+
+			var httpProxy *proxy.ReverseProxy
+
+			if config.Http.Default != nil {
+				httpProxy = proxy.NewReverseProxy(fmt.Sprintf(":%d", config.Http.Default.Port))
+			}
+
+			var otherProxies map[string]*proxy.ReverseProxy
+			if len(usesDefaultPort) > 0 {
+				otherProxies = make(map[string]*proxy.ReverseProxy, len(usesDefaultPort))
+			}
+
+			for _, s := range usesDefaultPort {
+				if s.Upstream == nil {
+					continue
+				}
+
+				if !validateIp(s.Upstream[0].Host) {
+					s.Upstream[0].Host = LookupIp(ipResolver, s.Upstream[0].Host)
+				}
+
+				origin := fmt.Sprintf("%s:%d", s.Upstream[0].Host, s.Upstream[0].Port)
+				otherProxies[origin] = proxy.NewReverseProxy(origin)
+			}
+
 			go func() {
-				Info("Starting default http proxy")
-
-				var httpProxy *proxy.ReverseProxy
-
-				if config.Http.Default != nil {
-					httpProxy = proxy.NewReverseProxy(fmt.Sprintf(":%d", config.Http.Default.Port))
-				}
-
-				var otherProxies map[string]*proxy.ReverseProxy
-				if len(usesDefaultPort) > 0 {
-					otherProxies = make(map[string]*proxy.ReverseProxy, len(usesDefaultPort))
-				}
-
-				for _, s := range usesDefaultPort {
-					otherProxies[s.Origin] = proxy.NewReverseProxy(s.Origin)
-				}
-
-				if err := fasthttp.ListenAndServe(":80", func(ctx *fasthttp.RequestCtx) {
+				err = fasthttp.ListenAndServe(":80", func(ctx *fasthttp.RequestCtx) {
 					host := string(ctx.Request.Header.Peek("Host"))
 					if host == "" {
 						ctx.Error("Unknown domain", fasthttp.StatusForbidden)
@@ -272,21 +299,61 @@ func main() {
 					}
 
 					if len(usesDefaultPort) > 0 {
-						for _, s := range usesDefaultPort {
+						for serverIndex, s := range usesDefaultPort {
 							for _, d := range s.Domains {
 								if d == host {
-									otherProxies[s.Origin].ServeHTTP(ctx)
-									return
+									if s.Routes != nil {
+										urlPath := string(ctx.Path())
+
+										for routeIndex, r := range s.Routes {
+											if r.ToStatic != (routeStatic{}) && strings.HasPrefix(urlPath, r.Value) {
+												startOffset := strings.LastIndex(urlPath, r.Value)
+												if startOffset == 0 {
+													startOffset = len(r.Value)
+												}
+
+												newPath := urlPath[startOffset:]
+												log.InfoTo("request", "%s", string(ctx.Request.URI().Path()))
+
+												ctx.Request.URI().SetPath(newPath)
+
+												key := core.FormatFilesystemHandlerKey(core.LocationDefault, serverIndex, routeIndex)
+												if filesystemHandlers[key] == nil {
+													fs := &fasthttp.FS{
+														Root:               r.ToStatic.Root,
+														IndexNames:         []string{"index.html"},
+														GenerateIndexPages: r.ToStatic.IndexPages,
+													}
+
+													filesystemHandlers[key] = fs.NewRequestHandler()
+												}
+
+												filesystemHandlers[key](ctx)
+												return
+											} else if r.To != "" && strings.HasPrefix(urlPath, r.Value) {
+												ctx.Request.URI().SetPath(path.Join(r.To, urlPath))
+											}
+										}
+
+										ctx.Error("Not found", fasthttp.StatusNotFound)
+										return
+									}
 								}
+
+								origin := fmt.Sprintf("%s:%d", s.Upstream[0].Host, s.Upstream[0].Port)
+								otherProxies[origin].ServeHTTP(ctx)
+								return
 							}
 						}
-
-						ctx.Error("Unknown domain", fasthttp.StatusForbidden)
 					} else if httpProxy != nil {
 						httpProxy.ServeHTTP(ctx)
+						return
 					}
-				}); err != nil {
-					log.Fatal(err)
+
+					ctx.Error("No destination", fasthttp.StatusForbidden)
+				})
+				if err != nil {
+					return
 				}
 			}()
 		}
@@ -306,18 +373,17 @@ func main() {
 			go func() {
 				proxyServer, _ := proxy.NewWSReverseProxyWith(options...)
 				addr := fmt.Sprintf(":%d", server.Port)
-				Infof("Starting websocket server at %s", addr)
+				log.Info("Starting websocket server at %s", addr)
 
 				if err := fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
 					proxyServer.ServeHTTP(ctx)
 				}); err != nil {
-					Fatal(err)
+					log.Fatal(err.Error())
 				}
 			}()
 		}
 	}
 
 	for {
-		CheckLoggerChannel()
 	}
 }

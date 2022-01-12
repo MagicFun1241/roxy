@@ -4,10 +4,19 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e05a6c49-0443-4dbf-9cc1-8ad9bb39f906" name="Changes" comment="Implement:&#10;• http3 to http2 with single upstream&#10;• allowedHostsGroups&#10;• logger&#10;&#10;Fix:&#10;• disable proxy debug message">
+    <list default="true" id="e05a6c49-0443-4dbf-9cc1-8ad9bb39f906" name="Changes" comment="Implement:&#10;• multiple servers on single 80 port (vport)">
+      <change afterPath="$PROJECT_DIR$/build/plugins/ratelimit.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/build/test/session" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/core/filesystems.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/core/js/logger/main.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/core/routes.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/plugins/core/main.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.go" beforeDir="false" afterPath="$PROJECT_DIR$/config.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.template.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/config.template.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/go.mod" beforeDir="false" afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/go.sum" beforeDir="false" afterPath="$PROJECT_DIR$/go.sum" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logger.go" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/main.go" beforeDir="false" afterPath="$PROJECT_DIR$/main.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -30,7 +39,6 @@
     <option name="indexEntireGoPath" value="false" />
   </component>
   <component name="HighlightingSettingsPerFile">
-    <setting file="file://$PROJECT_DIR$/logger.go" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/main.go" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/config.go" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/go.mod" root0="FORCE_HIGHLIGHTING" />
@@ -59,7 +67,12 @@
     <property name="go.sdk.automatically.set" value="true" />
     <property name="last_opened_file_path" value="$USER_HOME$" />
   </component>
-  <component name="RunManager">
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\Nikita\go\src\roxy\build" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Go Build.debug">
     <configuration default="true" type="GoApplicationRunConfiguration" factoryName="Go Application">
       <module name="roxy" />
       <working_directory value="$PROJECT_DIR$" />
@@ -69,14 +82,24 @@
       <filePath value="$PROJECT_DIR$" />
       <method v="2" />
     </configuration>
-    <configuration name="go build github.com/MagicFun1241/roxy" type="GoApplicationRunConfiguration" factoryName="Go Application" nameIsGenerated="true">
+    <configuration name="debug" type="GoApplicationRunConfiguration" factoryName="Go Application">
       <module name="roxy" />
-      <working_directory value="$PROJECT_DIR$" />
+      <working_directory value="$PROJECT_DIR$/build" />
       <go_parameters value="-o ./build/roxy.exe" />
-      <parameters value="-config config.template.yaml" />
+      <parameters value="-config ../config.template.yaml" />
       <kind value="DIRECTORY" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="release" type="GoApplicationRunConfiguration" factoryName="Go Application">
+      <module name="roxy" />
+      <working_directory value="$PROJECT_DIR$/build" />
+      <go_parameters value="-o ./build/roxy.exe -ldflags &quot;-s -w&quot;" />
+      <kind value="DIRECTORY" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <option name="run" value="false" />
       <method v="2" />
     </configuration>
     <configuration default="true" type="GoTestRunConfiguration" factoryName="Go Test">
@@ -89,6 +112,10 @@
       <framework value="gotest" />
       <method v="2" />
     </configuration>
+    <list>
+      <item itemvalue="Go Build.debug" />
+      <item itemvalue="Go Build.release" />
+    </list>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TypeScriptGeneratedFilesManager">
@@ -99,7 +126,19 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="origin/main" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
@@ -109,7 +148,8 @@
   <component name="VcsManagerConfiguration">
     <option name="ADD_EXTERNAL_FILES_SILENTLY" value="true" />
     <MESSAGE value="Implement:&#10;• http3 to http2 with single upstream&#10;• allowedHostsGroups&#10;• logger&#10;&#10;Fix:&#10;• disable proxy debug message" />
-    <option name="LAST_COMMIT_MESSAGE" value="Implement:&#10;• http3 to http2 with single upstream&#10;• allowedHostsGroups&#10;• logger&#10;&#10;Fix:&#10;• disable proxy debug message" />
+    <MESSAGE value="Implement:&#10;• multiple servers on single 80 port (vport)" />
+    <option name="LAST_COMMIT_MESSAGE" value="Implement:&#10;• multiple servers on single 80 port (vport)" />
   </component>
   <component name="VgoProject">
     <integration-enabled>true</integration-enabled>
